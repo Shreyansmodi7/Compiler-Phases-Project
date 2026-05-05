@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import json
 
-BACKEND_URL = "http://127.0.0.1:5000"
+BACKEND_URL = "http://127.0.0.1:5001"
 
 st.set_page_config(page_title="Compiler 4 Phases", page_icon="⚙️", layout="wide")
 
@@ -85,7 +85,7 @@ def safe_post(endpoint, code):
         print(f"[DEBUG] raw response = {resp.text[:200]}")
 
         if resp.status_code == 0 or not resp.text.strip():
-            return None, "Backend returned empty response. Is Flask running on port 5000?"
+            return None, "Backend returned empty response. Is Flask running on port 5001?"
 
         try:
             return resp.json(), None
@@ -106,7 +106,7 @@ with st.sidebar:
     st.markdown("---")
     phase = st.radio("Select Phase", [
         "1️⃣  Tokenization",
-        "2️⃣  ICDG (Intermediate Code)",
+        "2️⃣  ICG (Intermediate Code)",
         "3️⃣  Code Optimization",
         "4️⃣  Code Generation",
     ])
@@ -183,14 +183,14 @@ with col_out:
 
     # ── PHASE 2 ─────────────────────────────────────
     elif "2️⃣" in phase:
-        st.markdown('<div class="phase-header">📋 Phase 2 — Intermediate Code Generation (TAC)</div>',
+        st.markdown('<div class="phase-header">📋 Phase 2 — Intermediate Code Generation</div>',
                     unsafe_allow_html=True)
 
         if run_btn:
             if not code.strip():
                 st.markdown('<div class="warn">⚠ Please enter some code first.</div>', unsafe_allow_html=True)
             else:
-                with st.spinner("Generating TAC..."):
+                with st.spinner("Generating ICDG..."):
                     result, err = safe_post("icdg", code)
 
                 if err:
@@ -202,15 +202,38 @@ with col_out:
 
         if "icdg" in st.session_state:
             res = st.session_state["icdg"]
-            tac = res.get("tac", [])
-            st.markdown(f'<div class="ok">✓ {res.get("instruction_count", 0)} instructions generated</div>',
-                        unsafe_allow_html=True)
-            st.markdown("**Three Address Code:**")
-            tac_text = "\n".join([row["Instruction"] for row in tac])
-            st.code(tac_text, language="text")
-            st.markdown("**Instruction Table:**")
-            df = pd.DataFrame(tac)
-            st.dataframe(df, use_container_width=True, height=320)
+            st.markdown(f"### C Code — {res.get('instruction_count', 0)} instructions generated")
+
+            # 1. TAC
+            with st.container():
+                st.markdown('<div style="background:#f0f4f8; padding:15px; border-radius:10px; border-left:5px solid #2563eb; margin-bottom:20px;">'
+                            '<h4 style="color:#1e3a5f; margin-top:0;">● THREE ADDRESS CODE (TAC)</h4>', unsafe_allow_html=True)
+                st.code(res.get("tac", ""), language="text")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # 2. Quadruple
+            with st.container():
+                st.markdown('<div style="background:#f0f4f8; padding:15px; border-radius:10px; border-left:5px solid #2563eb; margin-bottom:20px;">'
+                            '<h4 style="color:#1e3a5f; margin-top:0;">● QUADRUPLE</h4>', unsafe_allow_html=True)
+                df_quad = pd.DataFrame(res.get("quadruples", []))
+                st.table(df_quad)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # 3. Triple
+            with st.container():
+                st.markdown('<div style="background:#f0f4f8; padding:15px; border-radius:10px; border-left:5px solid #2563eb; margin-bottom:20px;">'
+                            '<h4 style="color:#1e3a5f; margin-top:0;">● TRIPLE</h4>', unsafe_allow_html=True)
+                df_triple = pd.DataFrame(res.get("triples", []))
+                st.table(df_triple)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            # 4. Indirect Triple
+            with st.container():
+                st.markdown('<div style="background:#f0f4f8; padding:15px; border-radius:10px; border-left:5px solid #2563eb; margin-bottom:20px;">'
+                            '<h4 style="color:#1e3a5f; margin-top:0;">● INDIRECT TRIPLE</h4>', unsafe_allow_html=True)
+                df_indirect = pd.DataFrame(res.get("indirect_triples", []))
+                st.table(df_indirect)
+                st.markdown('</div>', unsafe_allow_html=True)
 
     # ── PHASE 3 ─────────────────────────────────────
     elif "3️⃣" in phase:

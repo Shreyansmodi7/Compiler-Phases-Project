@@ -23,15 +23,17 @@ def tokenize():
         col = 1
 
         patterns = [
+            ("PREPROCESSOR", r'\#include\s*<[^>]+>'),
             ("KEYWORD", r'\b(int|float|char|void|if|else|while|for|return|printf|scanf|main|include)\b'),
-            ("INTEGER", r'\b\d+\b'),
             ("FLOAT", r'\b\d+\.\d+\b'),
+            ("INTEGER", r'\b\d+\b'),
             ("STRING", r'"[^"]*"'),
             ("OPERATOR", r'(==|!=|<=|>=|\+\+|--|&&|\|\||->|[+\-*/%=<>!&|])'),
             ("DELIMITER", r'[(){}\[\];,:]'),
             ("IDENTIFIER", r'[a-zA-Z_]\w*'),
             ("WHITESPACE", r'\s+'),
         ]
+        errors = []
 
         while pos < len(code):
             matched = False
@@ -49,13 +51,20 @@ def tokenize():
                     pos = m.end()
                     matched = True
                     break
-            if not matched: pos += 1
+            if not matched:
+                errors.append({"character": code[pos], "line": line, "col": col})
+                pos += 1
+                col += 1
 
         summary = {}
         for t in tokens:
             summary[t['type']] = summary.get(t['type'], 0) + 1
 
-        return jsonify({"tokens": tokens, "summary": summary, "total": len(tokens), "error": None}), 200
+        error = None
+        if errors:
+            error = f"Lexical errors detected: {len(errors)} invalid character(s)"
+
+        return jsonify({"tokens": tokens, "summary": summary, "total": len(tokens), "errors": errors, "error": error}), 200
     except Exception as e:
         return jsonify({"error": str(e), "tokens": [], "summary": {}, "total": 0}), 500
 
@@ -64,35 +73,250 @@ def tokenize():
 def icdg():
     try:
         code = request.json.get('source_code', '')
-        if not code: return jsonify({"error": "No code", "tac": [], "instruction_count": 0}), 400
+        if not code: return jsonify({"error": "No code", "tac": "", "quadruples": []}), 400
 
-        tac = []
-        for line in code.split('\n'):
-            s = line.strip()
-            if not s or s.startswith('//'): continue
-            if s.startswith('#'):
-                tac.append(f"; {s}")
-            elif 'main' in s:
-                tac.append("FUNC_BEGIN main")
-            elif s == '}':
-                tac.append("FUNC_END")
-            elif '=' in s and 'if' not in s:
-                tac.append(f"  {s.rstrip(';')}")
-            elif 'for' in s:
-                tac.append("; FOR")
-            elif 'while' in s:
-                tac.append("; WHILE")
-            elif 'if' in s:
-                tac.append("; IF")
-            elif 'printf' in s:
-                tac.append("; CALL printf")
-            elif 'return' in s:
-                tac.append("; RETURN")
+        import re
 
-        fmt = [{"#": i + 1, "Instruction": x} for i, x in enumerate(tac)]
-        return jsonify({"tac": fmt, "instruction_count": len(tac), "error": None}), 200
+        # Generator state
+        quads = []
+        temp_count = 1
+        label_count = 1
+
+        def get_temp():
+            nonlocal temp_count
+            t = f"t{temp_count}"
+            temp_count += 1
+            return t
+
+        def get_label():
+            nonlocal label_count
+            l = f"L{label_count}"
+            label_count += 1
+            return l
+
+        # Helper to parse conditions like (i == 1 || i == n)
+        def parse_condition(cond):
+            cond = cond.strip()
+            # Handle multiple ORs
+            if '||' in cond:
+                parts = [p.strip() for p in cond.split('||')]
+                prev_t = None
+                for i, p in enumerate(parts):
+                    # Handle sub-condition like i == 1
+                    sub_t = parse_condition(p)
+                    if prev_t is None:
+                        prev_t = sub_t
+                    else:
+                        new_t = get_temp()
+                        quads.append({'op': '||', 'arg1': prev_t, 'arg2': sub_t, 'result': new_t})
+                        prev_t = new_t
+                return prev_t
+
+            # Handle single comparison
+            for op in ['<=', '>=', '==', '!=', '<', '>']:
+                if op in cond:
+                    c_parts = cond.split(op)
+                    t = get_temp()
+                    quads.append({'op': op, 'arg1': c_parts[0].strip(), 'arg2': c_parts[1].strip(), 'result': t})
+                    return t
+            return cond
+
+        # Pre-process code: clean up and normalize
+        clean_code = re.sub(r'#include\s+<.*?>', '', code)
+        clean_code = re.sub(r'int\s+main\s*\(\s*\)\s*\{', '', clean_code)
+        clean_code = re.sub(r'return\s+0\s*;', '', clean_code)
+
+        # Tokenize basic constructs (very simple regex-based tokenizer)
+        # We look for for loops, if statements, printf, and assignments
+
+        def process_block(text):
+            # Find assignments: int n = 5;
+            assigns = re.findall(r'(?:int|float|char)?\s*([a-zA-Z_]\w*)\s*=\s*([^;]+);', text)
+            for var, val in assigns:
+                quads.append({'op': ':=', 'arg1': val.strip(), 'arg2': '', 'result': var.strip()})
+                text = text.replace(f"{var} = {val};", "", 1) # remove to avoid double processing
+
+        # This is a very complex task for a simple endpoint.
+        # I'll implement a recursive-descent style parser for the specific constructs we care about.
+
+        def parse_recursive(text):
+            text = text.strip()
+            if not text: return
+
+            # 1. Handle FOR loop: for(init; cond; inc) { ... }
+            for_match = re.search(r'for\s*\(([^;]+);([^;]+);([^)]+)\)\s*\{', text)
+            if for_match:
+                init, cond, inc = for_match.groups()
+                # Init
+                if '=' in init:
+                    v, val = init.split('=')
+                    quads.append({'op': ':=', 'arg1': val.strip(), 'arg2': '', 'result': v.replace('int','').strip()})
+
+                start_label = get_label()
+                quads.append({'op': 'label', 'arg1': start_label, 'arg2': '', 'result': ''})
+
+                # Condition
+                t_cond = parse_condition(cond)
+                end_label = get_label()
+                # We use 'if_false' goto end to match the requested style if possible,
+                # or 'if' with inverted condition. The user used 'if i > n goto L8' for 'i <= n'.
+                # Let's try to invert common ops.
+                inv_op = {'<=': '>', '>=': '<', '==': '!=', '!=': '==', '<': '>=', '>': '<='}
+                op_found = False
+                for op, inv in inv_op.items():
+                    if op in cond:
+                        c_parts = cond.split(op)
+                        t_inv = get_temp()
+                        quads.append({'op': inv, 'arg1': c_parts[0].strip(), 'arg2': c_parts[1].strip(), 'result': t_inv})
+                        quads.append({'op': 'if', 'arg1': t_inv, 'arg2': end_label, 'result': 'goto'})
+                        op_found = True
+                        break
+                if not op_found:
+                    quads.append({'op': 'if_false', 'arg1': t_cond, 'arg2': end_label, 'result': 'goto'})
+
+                # Body (find matching brace)
+                body_start = for_match.end()
+                bracket_level = 1
+                body_end = body_start
+                while bracket_level > 0 and body_end < len(text):
+                    if text[body_end] == '{': bracket_level += 1
+                    elif text[body_end] == '}': bracket_level -= 1
+                    body_end += 1
+
+                body_text = text[body_start : body_end-1]
+                parse_recursive(body_text)
+
+                # Increment
+                if '++' in inc:
+                    v = inc.replace('++', '').strip()
+                    quads.append({'op': ':=', 'arg1': f"{v} + 1", 'arg2': '', 'result': v})
+                elif '--' in inc:
+                    v = inc.replace('--', '').strip()
+                    quads.append({'op': ':=', 'arg1': f"{v} - 1", 'arg2': '', 'result': v})
+                elif '=' in inc:
+                    v, val = inc.split('=')
+                    quads.append({'op': ':=', 'arg1': val.strip(), 'arg2': '', 'result': v.strip()})
+
+                quads.append({'op': 'goto', 'arg1': start_label, 'arg2': '', 'result': ''})
+                quads.append({'op': 'label', 'arg1': end_label, 'arg2': '', 'result': ''})
+
+                parse_recursive(text[body_end:])
+                return
+
+            # 2. Handle IF: if(cond) { ... } else { ... }
+            if_match = re.search(r'if\s*\(([^)]+)\)\s*\{', text)
+            if if_match:
+                cond = if_match.group(1)
+                t_cond = parse_condition(cond)
+
+                l_true = get_label()
+                l_false = get_label()
+                l_end = get_label()
+
+                quads.append({'op': 'if', 'arg1': t_cond, 'arg2': l_true, 'result': 'goto'})
+                quads.append({'op': 'goto', 'arg1': l_false, 'arg2': '', 'result': ''})
+
+                quads.append({'op': 'label', 'arg1': l_true, 'arg2': '', 'result': ''})
+
+                # Body
+                body_start = if_match.end()
+                bracket_level = 1
+                body_end = body_start
+                while bracket_level > 0 and body_end < len(text):
+                    if text[body_end] == '{': bracket_level += 1
+                    elif text[body_end] == '}': bracket_level -= 1
+                    body_end += 1
+
+                parse_recursive(text[body_start : body_end-1])
+                quads.append({'op': 'goto', 'arg1': l_end, 'arg2': '', 'result': ''})
+
+                quads.append({'op': 'label', 'arg1': l_false, 'arg2': '', 'result': ''})
+
+                # Else
+                rest = text[body_end:].strip()
+                if rest.startswith('else'):
+                    else_body_start = rest.find('{') + 1
+                    bracket_level = 1
+                    else_body_end = else_body_start
+                    while bracket_level > 0 and else_body_end < len(rest):
+                        if rest[else_body_end] == '{': bracket_level += 1
+                        elif rest[else_body_end] == '}': bracket_level -= 1
+                        else_body_end += 1
+                    parse_recursive(rest[else_body_start : else_body_end-1])
+                    quads.append({'op': 'label', 'arg1': l_end, 'arg2': '', 'result': ''})
+                    parse_recursive(rest[else_body_end:])
+                else:
+                    quads.append({'op': 'label', 'arg1': l_end, 'arg2': '', 'result': ''})
+                    parse_recursive(rest)
+                return
+
+            # 3. Handle PRINTF
+            print_match = re.search(r'printf\s*\("([^"]*)"(?:,\s*([^)]+))?\)\s*;', text)
+            if print_match:
+                fmt, args = print_match.groups()
+                if args:
+                    arg_list = [a.strip() for a in args.split(',')]
+                    for a in arg_list:
+                        quads.append({'op': 'print', 'arg1': a, 'arg2': '', 'result': ''})
+                else:
+                    if fmt == '\\n':
+                        quads.append({'op': 'print', 'arg1': 'newline', 'arg2': '', 'result': ''})
+                    else:
+                        quads.append({'op': 'print', 'arg1': f'"{fmt}"', 'arg2': '', 'result': ''})
+
+                parse_recursive(text[print_match.end():])
+                return
+
+            # 4. Handle simple assignments
+            assign_match = re.search(r'(?:int|float|char)?\s*([a-zA-Z_]\w*)\s*=\s*([^;]+);', text)
+            if assign_match:
+                var, val = assign_match.groups()
+                quads.append({'op': ':=', 'arg1': val.strip(), 'arg2': '', 'result': var.strip()})
+                parse_recursive(text[assign_match.end():])
+                return
+
+        # Start parsing
+        parse_recursive(clean_code)
+        quads.append({'op': 'end', 'arg1': '', 'arg2': '', 'result': ''})
+
+        # Format results (same as before)
+        tac_lines = []
+        for q in quads:
+            if q['op'] == 'label': tac_lines.append(f"{q['arg1']}:")
+            elif q['op'] == ':=': tac_lines.append(f"  {q['result']} = {q['arg1']}")
+            elif q['op'] in ['+', '-', '*', '/', '%', '<=', '>=', '==', '!=', '<', '>', '||', '&&']:
+                tac_lines.append(f"  {q['result']} = {q['arg1']} {q['op']} {q['arg2']}")
+            elif q['op'] == 'if': tac_lines.append(f"  if {q['arg1']} goto {q['arg2']}")
+            elif q['op'] == 'if_false': tac_lines.append(f"  if_false {q['arg1']} goto {q['arg2']}")
+            elif q['op'] == 'goto': tac_lines.append(f"  goto {q['arg1']}")
+            elif q['op'] == 'print': tac_lines.append(f"  print {q['arg1']}")
+            elif q['op'] == 'end': tac_lines.append("  end")
+
+        quad_fmt = []
+        for i, q in enumerate(quads):
+            quad_fmt.append({"NO.": f"({i+1})", "OP": q['op'], "ARG1": q['arg1'], "ARG2": q['arg2'], "RESULT": q['result']})
+
+        triple_fmt = []
+        res_to_idx = {}
+        for i, q in enumerate(quads):
+            a1, a2 = q['arg1'], q['arg2']
+            if a1 in res_to_idx: a1 = res_to_idx[a1]
+            if a2 in res_to_idx: a2 = res_to_idx[a2]
+            triple_fmt.append({"NO.": f"({i+1})", "OP": q['op'], "ARG1": a1, "ARG2": a2})
+            if q['result'] and q['result'].startswith('t'): res_to_idx[q['result']] = f"({i+1})"
+
+        indirect_fmt = [{"POINTER": 40+i, "NO.": t["NO."], "OP": t["OP"], "ARG1": t["ARG1"], "ARG2": t["ARG2"]} for i, t in enumerate(triple_fmt)]
+
+        return jsonify({
+            "tac": "\n".join(tac_lines),
+            "quadruples": quad_fmt,
+            "triples": triple_fmt,
+            "indirect_triples": indirect_fmt,
+            "instruction_count": len(quads),
+            "error": None
+        }), 200
     except Exception as e:
-        return jsonify({"error": str(e), "tac": [], "instruction_count": 0}), 500
+        return jsonify({"error": str(e), "tac": "", "quadruples": [], "triples": [], "indirect_triples": [], "instruction_count": 0}), 500
 
 
 @app.route('/optimize', methods=['POST'])
@@ -146,7 +370,7 @@ def codegen():
             s = line.strip()
             if not s or s.startswith('//') or s.startswith('#'):
                 continue
-            
+
             if 'printf' in s:
                 asm.append("  CALL printf")
             elif 'scanf' in s:
@@ -229,6 +453,6 @@ def codegen():
 
 if __name__ == '__main__':
     print("=" * 40)
-    print(" Backend running on :5000")
+    print(" Backend running on :5001")
     print("=" * 40)
-    app.run(host='localhost', port=5000, debug=False, threaded=True)
+    app.run(host='localhost', port=5001, debug=False, threaded=True)

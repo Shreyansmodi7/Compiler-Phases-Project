@@ -1,194 +1,146 @@
-# ⚙️ Compiler Phases Project
+# Compiler Phases Project
 
-> A full-stack web application that demonstrates all **4 phases of a Compiler** on C source code — built with Python, Flask, and Streamlit.
+A full-stack compiler design project that demonstrates four compiler phases for C source code using a Flask backend and Streamlit frontend.
 
----
-
-## 👥 Team Members
+## Team Members
 
 | Name | Register Number |
-|------|----------------|
+|---|---|
 | Shreyans Modi | RA2311026010720 |
 | Roshan | RA2311026010713 |
 | Lokesh | RA2311026010715 |
 | Uthkarsh | RA2311026010725 |
 
-> **Subject:** Compiler Design — SRM Institute of Science & Technology
+Subject: Compiler Design, SRM Institute of Science & Technology
 
----
+## Project Overview
 
-## 📌 About the Project
+The application allows users to enter a C program, choose a compiler phase, and view the generated compiler output in a web interface. The frontend sends code to the Flask API, and the backend returns structured JSON results for display.
 
-This project implements the **4 major phases of a compiler** for C language source code through an interactive web interface. Users can input any C program and analyse it through each phase step by step.
+## Features
 
----
+| Phase | Feature | Output |
+|---|---|---|
+| Phase 1 | Tokenization / Lexical Analysis | Token stream, token table, token summary, lexical errors |
+| Phase 2 | Intermediate Code Generation | TAC, quadruples, triples, indirect triples |
+| Phase 3 | Code Optimization | Optimized instruction list and removed instruction count |
+| Phase 4 | Code Generation | Simplified x86-64 style assembly code |
 
-## 🔄 Compiler Phases Implemented
-
-### Phase 1 — Tokenization (Lexical Analysis)
-- Breaks source code into tokens
-- Identifies: `KEYWORD`, `IDENTIFIER`, `INTEGER`, `FLOAT`, `STRING`, `OPERATOR`, `DELIMITER`, `PREPROCESSOR`
-- Colour-coded token stream display
-- Token table with **Line**, **Token Type**, **Lexeme**
-- Detects unknown/invalid characters as lexical errors
-
-### Phase 2 — Syntax Analysis (Parsing)
-- Checks grammar and structure of the C code
-- Detects mismatched brackets `{}`, `()`, `[]`
-- Detects missing semicolons
-- Builds and displays an **Abstract Syntax Tree (AST)**
-- Reports exact line number of syntax errors
-
-### Phase 3 — Semantic Analysis
-- Checks the meaning and correctness of the code
-- Detects undeclared variables
-- Detects unused variables (warnings)
-- Builds a complete **Symbol Table** (Name, Kind, Type, Line, Used)
-- Reports semantic errors and warnings separately
-
-### Phase 4 — Intermediate Code Generation
-- Generates **Three Address Code (TAC)**
-- Handles: assignments, arithmetic, `if/else`, `for`, `while`, `printf/scanf`, `return`
-- Displays numbered instruction table
-- Code view for easy reading
-
----
-
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | Python — Streamlit |
-| Backend | Python — Flask |
-| Database | SQLite |
-| Language Supported | C |
+|---|---|
+| Frontend | Streamlit |
+| Backend | Flask, Flask-CORS |
+| Data Display | Pandas |
+| Language | Python |
+| Input Language | C |
+| Tests | Python unittest |
 
----
+## Project Structure
 
-## 📁 Project Structure
-
-```
+```text
 Compiler-Phases-Project/
-│
 ├── backend/
-│   ├── app.py          # Flask API — all 4 compiler phases
-│   └── compiler.db     # SQLite database (auto-created)
-│
+│   └── app.py
 ├── frontend/
-│   ├── app.py          # Streamlit UI — 4-phase selector
-│
+│   └── app.py
+├── docs/
+│   └── SUBMISSION.md
+├── tests/
+│   └── test_api.py
 ├── requirements.txt
+├── .gitignore
 └── README.md
 ```
 
----
-
-## ⚙️ Setup & Run
-
-### Prerequisites
-- Python 3.8+
-- pip
-
-### Step 1 — Clone the Repository
-```bash
-git clone https://github.com/YOUR_USERNAME/Compiler-Phases-Project.git
-cd Compiler-Phases-Project
-```
-
-### Step 2 — Install Backend Dependencies
-```bash
-cd backend
-pip install flask flask-cors
-```
-
-### Step 3 — Start the Backend
-```bash
-python app.py
-```
-Backend runs at: `http://localhost:5000`
-
-### Step 4 — Install Frontend Dependencies
-```bash
-cd frontend
-pip install streamlit requests pandas
-```
-
-### Step 5 — Start the Frontend
-```bash
-streamlit run app.py
-```
-Frontend runs at: `http://localhost:8501`
-
----
-
-## 🖥️ API Endpoints
+## API Endpoints
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/tokenize` | Phase 1 — Tokenize source code |
-| POST | `/syntax` | Phase 2 — Syntax analysis + AST |
-| POST | `/semantic` | Phase 3 — Semantic analysis |
-| POST | `/codegen` | Phase 4 — Generate TAC |
-| GET | `/health` | Health check |
+|---|---|---|
+| GET | `/health` | Checks backend status |
+| POST | `/tokenize` | Generates lexical tokens |
+| POST | `/icdg` | Generates intermediate code |
+| POST | `/optimize` | Optimizes intermediate instructions |
+| POST | `/codegen` | Generates assembly code |
 
----
+## Setup
 
-## 📸 Sample Output
+Install dependencies:
 
-### Input Code
+```bash
+pip install -r requirements.txt
+```
+
+Start the backend:
+
+```bash
+python3 backend/app.py
+```
+
+The backend runs on:
+
+```text
+http://localhost:5001
+```
+
+Start the frontend in another terminal:
+
+```bash
+python3 -m streamlit run frontend/app.py
+```
+
+The frontend runs on:
+
+```text
+http://localhost:8501
+```
+
+## Test Cases
+
+Run the automated API test cases:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+The tests verify:
+
+- Health endpoint response
+- Token generation for valid C code
+- Lexical error detection for invalid characters
+- Float literal recognition
+- Intermediate code output
+- Optimization output
+- Assembly code generation
+- Empty input validation
+
+## Sample Input
+
 ```c
 #include <stdio.h>
 int main() {
     int i = 1;
-    while(i <= 5) {
-        printf("Value: %d\n", i);
+    int total = 0;
+    while(i <= 3) {
+        total = total + i;
         i++;
     }
+    printf("Total = %d\n", total);
     return 0;
 }
 ```
 
-### Phase 1 — Token Table
-| Line | Token Type | Lexeme |
-|------|-----------|--------|
-| 1 | PREPROCESSOR | #include <stdio.h> |
-| 2 | KEYWORD | int |
-| 2 | IDENTIFIER | main |
-| 3 | KEYWORD | int |
-| 3 | IDENTIFIER | i |
-| 3 | OPERATOR | = |
-| 3 | INTEGER | 1 |
+## Submission Notes
 
-### Phase 4 — Three Address Code
-```
-FUNC_BEGIN main
-  DECLARE int i
-  i = 1
-L1:
-  t1 = i <= 5
-  IF_FALSE t1 GOTO L2
-  CALL printf [...]
-  t2 = i + 1
-  i = t2
-  GOTO L1
-L2:
-  RETURN 0
-FUNC_END
+The assignment submission document is available at:
+
+```text
+docs/SUBMISSION.md
 ```
 
----
+Add project screenshots to a `screenshots/` folder before uploading the final GitHub link.
 
-## 🔍 Error Detection Examples
+## License
 
-| Phase | Error Type | Example |
-|-------|-----------|---------|
-| Lexical | Unknown character | `@` or `$` in code |
-| Syntax | Missing semicolon | `int x = 5` without `;` |
-| Syntax | Unmatched bracket | `{` without closing `}` |
-| Semantic | Undeclared variable | Using `x` without `int x;` |
-| Semantic | Unused variable | Declaring `int y;` but never using it |
-
----
-
-## 📄 License
-This project is built for academic purposes under the Compiler Design course at SRM Institute of Science & Technology.
+This project is built for academic use as part of the Compiler Design course.
